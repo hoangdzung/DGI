@@ -3,11 +3,10 @@ import scipy.sparse as sp
 import torch
 import torch.nn as nn
 
-from models import DGI, LogReg, GCNet
+from models import DGI, LogReg
 from utils import process
-from loss import ncut_loss
 
-dataset = 'cora'
+dataset = 'citeseer'
 
 # training params
 batch_size = 1
@@ -42,9 +41,7 @@ idx_train = torch.LongTensor(idx_train)
 idx_val = torch.LongTensor(idx_val)
 idx_test = torch.LongTensor(idx_test)
 
-# model = DGI(ft_size, hid_units, nonlinearity)
-model = GCNet(ft_size, hid_units, nonlinearity)
-
+model = DGI(ft_size, hid_units, nonlinearity)
 optimiser = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=l2_coef)
 
 if torch.cuda.is_available():
@@ -60,6 +57,7 @@ if torch.cuda.is_available():
     idx_val = idx_val.cuda()
     idx_test = idx_test.cuda()
 
+b_xent = nn.BCEWithLogitsLoss()
 xent = nn.CrossEntropyLoss()
 cnt_wait = 0
 best = 1e9
@@ -68,10 +66,21 @@ best_t = 0
 for epoch in range(nb_epochs):
     model.train()
     optimiser.zero_grad()
+
+    idx = np.random.permutation(nb_nodes)
+    shuf_fts = features[:, idx, :]
+
+    lbl_1 = torch.ones(batch_size, nb_nodes)
+    lbl_2 = torch.zeros(batch_size, nb_nodes)
+    lbl = torch.cat((lbl_1, lbl_2), 1)
+
+    if torch.cuda.is_available():
+        shuf_fts = shuf_fts.cuda()
+        lbl = lbl.cuda()
     
-    logits = model(features, sp_adj if sparse else adj, sparse) 
-    
-    loss = ncut_loss(adj, logits)
+    logits = model(features, shuf_fts, sp_adj if sparse else adj, sparse, None, None, None) 
+
+    loss = b_xent(logits, lbl)
 
     print('Loss:', loss)
 
