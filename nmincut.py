@@ -39,12 +39,15 @@ lr = args.lr
 weight_decay = args.weight_decay
 
 class GCNet(nn.Module):
-    def __init__(self, num_features, num_embedding = 128):
+    def __init__(self, num_features, num_embedding = 128, nb_classes=6):
         super(GCNet, self).__init__()
         self.conv = GCNConv(num_features, num_embedding, cached=True)
+        self.conv2 = GCNConv(num_embedding, nb_classes, cached=True)
     def forward(self, x, edge_index):
-        x = self.conv(x, edge_index)
-        return x
+        logits = self.conv(x, edge_index)
+        x = F.relu(logits)
+        x = self.conv2(x, edge_index)
+        return logits, x
 
 adj, features, labels, idx_train, idx_val, idx_test = process.load_data(args.dataset)
 if args.fprocess:
@@ -81,7 +84,7 @@ best_at = 0
 for epoch in tqdm(range(num_epochs)):
     model.train()
     model.zero_grad()
-    embeddings = model(features, edge_index)
+    logits, embeddings = model(features, edge_index)
     assign_tensor = gumbel_softmax(embeddings, temp=args.temp, hard=args.hard)
     #assign_tensor =  F.softmax(embeddings,-1)
     assign_tensor_t = torch.transpose(assign_tensor, 0, 1)
@@ -90,7 +93,7 @@ for epoch in tqdm(range(num_epochs)):
     diag = torch.diagonal(super_adj)
     norm_cut = (vol - diag)/(vol+1e-20)
     #print(torch.max(norm_cut), torch.min(norm_cut))
-    loss = norm_cut.sum() + torch.sqrt(((norm_cut-norm_cut.mean())**2).sum()) *10
+    loss = norm_cut.sum() #+ torch.sqrt(((norm_cut-norm_cut.mean())**2).sum()) *10
 
     loss.backward()
     optimizer.step()
@@ -99,7 +102,7 @@ for epoch in tqdm(range(num_epochs)):
         #import pdb;pdb.set_trace()
         # smallest_loss = loss.item()
         print(epoch, loss.item(), torch.max(norm_cut), torch.min(norm_cut))
-        embeddings = embeddings.detach()
+        embeddings = logits.detach()
         X_train = embeddings[idx_train]
         Y_train = labels[idx_train]
         X_test = embeddings[idx_test]
